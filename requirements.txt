@@ -1,0 +1,6 @@
+PyQt5>=5.15.0
+PyQtWebEngine>=5.15.0
+pymavlink>=2.4.0
+pyqtgraph>=0.13.0
+folium>=0.14.0
+pyserial>=3.5
