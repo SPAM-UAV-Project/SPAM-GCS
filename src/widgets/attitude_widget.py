@@ -48,14 +48,13 @@ class AttitudeIndicator(QWidget):
         
         self.setMinimumSize(180, 180)
         
-        # Colors - richer sky/ground
-        self.sky_top = QColor(0, 80, 160)
-        self.sky_bottom = QColor(80, 160, 220)
-        self.ground_top = QColor(120, 80, 40)
-        self.ground_bottom = QColor(80, 50, 25)
+        # Colors - richer sky/ground but more muted for modern look
+        self.sky_top = QColor(40, 100, 160)
+        self.sky_bottom = QColor(80, 140, 200)
+        self.ground_top = QColor(100, 70, 40)
+        self.ground_bottom = QColor(60, 40, 20)
         self.horizon_color = QColor(255, 255, 255)
-        self.aircraft_color = QColor(255, 200, 0)
-        self.text_color = QColor(255, 255, 255)
+        self.aircraft_color = QColor(255, 180, 0)
         
     def set_attitude_quaternion(self, q0, q1, q2, q3):
         """Update attitude from quaternion (w, x, y, z)."""
@@ -76,7 +75,7 @@ class AttitudeIndicator(QWidget):
         
         width = self.width()
         height = self.height()
-        size = min(width, height) - 10
+        size = min(width, height) - 4  # Minimal padding
         radius = size // 2
         center_x = width // 2
         center_y = height // 2
@@ -117,7 +116,8 @@ class AttitudeIndicator(QWidget):
         
         # Draw pitch ladder
         painter.setPen(QPen(Qt.white, 1))
-        font = QFont("Arial", 7)
+        font = QFont("Arial", 8)  # Slightly larger font
+        font.setBold(True)
         painter.setFont(font)
         
         for deg in [-20, -15, -10, -5, 5, 10, 15, 20]:
@@ -142,7 +142,7 @@ class AttitudeIndicator(QWidget):
             # Draw degree labels
             if abs(deg) % 10 == 0:
                 painter.drawText(line_width + 4, y + 3, str(abs(deg)))
-                painter.drawText(-line_width - 16, y + 3, str(abs(deg)))
+                painter.drawText(-line_width - 18, y + 3, str(abs(deg)))
         
         painter.restore()
         
@@ -162,13 +162,8 @@ class AttitudeIndicator(QWidget):
         painter.setBrush(self.aircraft_color)
         painter.drawEllipse(-6, -6, 12, 12)
         
-        # Draw outer bezel
-        painter.setPen(QPen(QColor(40, 40, 50), 4))
-        painter.setBrush(Qt.NoBrush)
-        painter.drawEllipse(-radius, -radius, radius * 2, radius * 2)
-        
         # Draw bank angle arc at top
-        painter.setPen(QPen(Qt.white, 1))
+        painter.setPen(QPen(Qt.white, 2))
         arc_radius = radius - 8
         
         # Bank angle tick marks
@@ -221,15 +216,16 @@ class AttitudeWidget(QWidget):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(6)
         
         self.attitude_indicator = AttitudeIndicator()
         layout.addWidget(self.attitude_indicator)
         
-        self.numeric_label = QLabel("R: ---°  P: ---°  Y: ---°")
+        # Modern, clean numeric display
+        self.numeric_label = QLabel("R: ---  P: ---  Y: ---")
         self.numeric_label.setAlignment(Qt.AlignCenter)
         self.numeric_label.setStyleSheet(
-            "font-family: 'Consolas', monospace; font-size: 11px; color: #888;"
+            "font-family: 'Segoe UI', sans-serif; font-size: 13px; font-weight: bold; color: #ddd; letter-spacing: 0.5px;"
         )
         layout.addWidget(self.numeric_label)
     
@@ -254,5 +250,5 @@ class AttitudeWidget(QWidget):
         pitch_deg = math.degrees(self.attitude_indicator.pitch)
         yaw_deg = math.degrees(self.attitude_indicator.yaw)
         self.numeric_label.setText(
-            f"R: {roll_deg:+.1f}°  P: {pitch_deg:+.1f}°  Y: {yaw_deg:+.1f}°"
+            f"R {roll_deg:+.1f}°   P {pitch_deg:+.1f}°   Y {yaw_deg:+.1f}°"
         )

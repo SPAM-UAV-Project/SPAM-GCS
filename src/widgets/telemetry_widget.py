@@ -17,29 +17,33 @@ class TelemetryTile(QFrame):
         self.setObjectName("telemetryTile")
         self.setStyleSheet("""
             #telemetryTile {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(60, 60, 90, 0.6),
-                    stop:1 rgba(40, 40, 70, 0.4));
-                border: 1px solid rgba(100, 100, 140, 0.3);
+                background-color: #2b2b40;
+                border: 1px solid #3d3d5c;
                 border-radius: 12px;
+            }
+            #telemetryTile:hover {
+                background-color: #32324a;
+                border-color: #4d4d73;
             }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(4)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(2)
         
         # Title
         title_label = QLabel(title.upper())
         title_label.setStyleSheet(
-            "color: rgba(160, 160, 200, 0.8); font-size: 9px; font-weight: 600; letter-spacing: 1px; background: transparent; border: none;"
+            "color: #8f8fab; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; background: transparent; border: none;"
         )
         layout.addWidget(title_label)
         
         # Value
         self.value_label = QLabel("---")
+        self.value_label.setWordWrap(True)
+        # Using Consolas 12px - smaller mono font to fit data
         self.value_label.setStyleSheet(
-            "color: #ffffff; font-size: 13px; font-family: 'Segoe UI', 'Consolas', monospace; font-weight: 500; background: transparent; border: none;"
+            "color: #ffffff; font-size: 12px; font-family: 'Consolas', monospace; font-weight: 600; background: transparent; border: none;"
         )
         layout.addWidget(self.value_label)
     
@@ -50,7 +54,7 @@ class TelemetryTile(QFrame):
     def set_color(self, color: str):
         """Set the value text color."""
         self.value_label.setStyleSheet(
-            f"color: {color}; font-size: 13px; font-family: 'Segoe UI', 'Consolas', monospace; font-weight: 500; background: transparent; border: none;"
+            f"color: {color}; font-size: 12px; font-family: 'Consolas', monospace; font-weight: 600; background: transparent; border: none;"
         )
 
 
@@ -71,8 +75,8 @@ class TelemetryWidget(QWidget):
         
         # Define tiles: (key, title, row, col, colspan)
         tile_config = [
-            ("position", "Position NED", 0, 0, 1),
-            ("velocity", "Velocity NED", 0, 1, 1),
+            ("position", "Position", 0, 0, 1),
+            ("velocity", "Velocity", 0, 1, 1),
             ("altitude", "Altitude", 1, 0, 1),
             ("heading", "Heading", 1, 1, 1),
             ("battery", "Battery", 2, 0, 1),
@@ -94,11 +98,14 @@ class TelemetryWidget(QWidget):
     
     def _on_local_position(self, msg):
         """Handle LOCAL_POSITION_NED message."""
+        # Clean formatted strings with minimal spacing
+        # N: 1.2 E: 3.4
+        # D: 5.6 m
         self.tiles['position'].set_value(
-            f"N:{msg.x:+.1f}  E:{msg.y:+.1f}  D:{msg.z:+.1f} m"
+            f"N {msg.x:.1f}  E {msg.y:.1f}\nD {msg.z:.1f} m"
         )
         self.tiles['velocity'].set_value(
-            f"{msg.vx:+.1f}  {msg.vy:+.1f}  {msg.vz:+.1f} m/s"
+            f"N {msg.vx:.1f}  E {msg.vy:.1f}\nD {msg.vz:.1f} m/s"
         )
         self.tiles['altitude'].set_value(f"{-msg.z:.1f} m")
     
@@ -114,9 +121,9 @@ class TelemetryWidget(QWidget):
         current = msg.current_battery / 100.0 if msg.current_battery != -1 else 0
         
         if voltage > 0:
-            text = f"{voltage:.2f}V"
+            text = f"{voltage:.1f}V"
             if current > 0:
-                text += f"  {current:.1f}A"
+                text += f" {current:.1f}A"
             self.tiles['battery'].set_value(text)
             
             if voltage > 11.5:
@@ -145,5 +152,7 @@ class TelemetryWidget(QWidget):
         }
         
         status_name, color = status_map.get(msg.system_status, ("Unknown", "#888"))
-        self.tiles['status'].set_value(f"{status_name}  Mode:{msg.custom_mode}")
+        # Truncate or use mode ID for compactness if status name is long
+        mode_str = f"Mode:{msg.custom_mode}"
+        self.tiles['status'].set_value(f"{status_name}\n({mode_str})")
         self.tiles['status'].set_color(color)

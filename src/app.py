@@ -95,7 +95,8 @@ class MainWindow(QMainWindow):
         usb_layout.addWidget(baud_label)
         
         self.baud_combo = QComboBox()
-        self.baud_combo.addItems(["115200", "57600", "921600", "460800"])
+        self.baud_combo.addItems(["921600", "57600", "115200", "460800"])
+        self.baud_combo.setCurrentIndex(0)  # Default to 921600
         usb_layout.addWidget(self.baud_combo)
         
         connection_layout.addWidget(self.usb_widget)

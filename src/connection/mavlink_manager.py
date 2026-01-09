@@ -38,9 +38,6 @@ class ConnectionWorker(QThread):
         self._connection = None
         self._last_heartbeat_time = 0
         self._heartbeat_timeout = 3.0
-        self._last_emit_time = 0
-        self._emit_interval = 0.033  # ~30Hz max update rate
-        self._mutex = QMutex()
         self._stop_requested = False
     
     def run(self):
@@ -74,6 +71,7 @@ class ConnectionWorker(QThread):
         # Main receive loop
         while self._running and not self._stop_requested:
             try:
+                # Use a small timeout to keep checking stop_requested
                 msg = self._connection.recv_match(blocking=True, timeout=0.05)
                 
                 if self._stop_requested:
@@ -81,11 +79,10 @@ class ConnectionWorker(QThread):
                 
                 if msg:
                     msg_type = msg.get_type()
-                    current_time = time.time()
                     
                     # Handle heartbeat specially
                     if msg_type == 'HEARTBEAT':
-                        self._last_heartbeat_time = current_time
+                        self._last_heartbeat_time = time.time()
                         
                         if not self._connected:
                             self._connected = True
@@ -113,10 +110,10 @@ class ConnectionWorker(QThread):
                             'yaw_deg': math.degrees(euler[2])
                         })
                     
-                    # Throttle message emissions to prevent UI overload
-                    if current_time - self._last_emit_time >= self._emit_interval:
-                        self.message_received.emit(msg)
-                        self._last_emit_time = current_time
+                    # Emit EVERYTHING. No throttling.
+                    # Qt signals queue up, so efficient main thread handling is key.
+                    # For typical telemetry links (50-200Hz), this is fine.
+                    self.message_received.emit(msg)
                 
                 # Check for heartbeat timeout
                 if self._connected and (time.time() - self._last_heartbeat_time) > self._heartbeat_timeout:
@@ -185,8 +182,9 @@ class ConnectionWorker(QThread):
                 return False
         return False
     
-    def request_data_stream(self, stream_id: int, rate_hz: int = 30):
+    def request_data_stream(self, stream_id: int, rate_hz: int = 50):
         """Request a specific data stream."""
+        # Request at 50Hz to get more data
         if self._connection:
             try:
                 self._connection.mav.request_data_stream_send(1, 1, stream_id, rate_hz, 1)
@@ -229,10 +227,10 @@ class MavlinkManager(QObject):
             self._worker.stop()
             
             # Wait for thread to finish with timeout
-            if not self._worker.wait(3000):
+            if not self._worker.wait(2000):
                 # Force terminate if it doesn't stop
                 self._worker.terminate()
-                self._worker.wait(1000)
+                self._worker.wait(500)
             
             # Disconnect all signals
             try:
@@ -250,7 +248,10 @@ class MavlinkManager(QObject):
     
     def connect_usb(self, port: str, baudrate: int = 115200):
         """Connect via USB serial port."""
-        # Always cleanup previous connection first
+        if self._connecting:
+            self.error_occurred.emit("Connection in progress")
+            return
+
         self._cleanup_worker()
         
         self._connecting = True
@@ -268,7 +269,10 @@ class MavlinkManager(QObject):
     
     def connect_wifi(self, ip: str, port: int = 14550, protocol: str = "udp"):
         """Connect via WiFi (UDP or TCP)."""
-        # Always cleanup previous connection first
+        if self._connecting:
+            self.error_occurred.emit("Connection in progress")
+            return
+
         self._cleanup_worker()
         
         self._connecting = True
@@ -306,7 +310,7 @@ class MavlinkManager(QObject):
     def _request_streams(self):
         """Request all data streams."""
         if self._worker:
-            self._worker.request_data_stream(0, 30)
+            self._worker.request_data_stream(0, 50)  # Request all a bit faster
     
     def disconnect(self):
         """Disconnect from the drone."""
@@ -330,11 +334,11 @@ class MavlinkManager(QObject):
             return self._worker.send_command_long(command, param1, param2, param3, param4, param5, param6, param7)
         return False
     
-    def request_data_stream(self, stream_id: int, rate_hz: int = 30):
+    def request_data_stream(self, stream_id: int, rate_hz: int = 50):
         """Request a specific data stream."""
         if self._worker:
             self._worker.request_data_stream(stream_id, rate_hz)
     
-    def request_all_streams(self, rate_hz: int = 30):
+    def request_all_streams(self, rate_hz: int = 50):
         """Request all common data streams."""
         self.request_data_stream(0, rate_hz)
