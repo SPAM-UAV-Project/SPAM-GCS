@@ -5,7 +5,7 @@ Converts quaternion to euler angles for display.
 
 import math
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
-from PyQt5.QtCore import Qt, QRectF, QPointF
+from PyQt5.QtCore import Qt, QRectF, QPointF, QTimer
 from PyQt5.QtGui import QPainter, QPen, QBrush, QColor, QFont, QLinearGradient, QPainterPath, QPolygonF
 
 
@@ -59,14 +59,12 @@ class AttitudeIndicator(QWidget):
     def set_attitude_quaternion(self, q0, q1, q2, q3):
         """Update attitude from quaternion (w, x, y, z)."""
         self.roll, self.pitch, self.yaw = quaternion_to_euler(q0, q1, q2, q3)
-        self.update()
     
     def set_attitude_euler(self, roll, pitch, yaw):
         """Update attitude from euler angles (radians)."""
         self.roll = roll
         self.pitch = pitch
         self.yaw = yaw
-        self.update()
     
     def paintEvent(self, event):
         """Draw the attitude indicator."""
@@ -228,7 +226,12 @@ class AttitudeWidget(QWidget):
             "font-family: 'Segoe UI', sans-serif; font-size: 13px; font-weight: bold; color: #ddd; letter-spacing: 0.5px;"
         )
         layout.addWidget(self.numeric_label)
-    
+
+        # Optimization: Update UI at 30Hz instead of every message
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self._update_display)
+        self.update_timer.start(33)  # ~30Hz
+
     def _subscribe_to_messages(self):
         """Subscribe to attitude messages."""
         self.message_broker.subscribe('ATTITUDE_QUATERNION', self._on_attitude_quaternion)
@@ -236,12 +239,17 @@ class AttitudeWidget(QWidget):
     
     def _on_attitude_quaternion(self, msg):
         """Handle ATTITUDE_QUATERNION message."""
+        # Just update state, don't repaint
         self.attitude_indicator.set_attitude_quaternion(msg.q1, msg.q2, msg.q3, msg.q4)
-        self._update_label()
     
     def _on_attitude(self, msg):
         """Handle ATTITUDE message."""
+        # Just update state, don't repaint
         self.attitude_indicator.set_attitude_euler(msg.roll, msg.pitch, msg.yaw)
+    
+    def _update_display(self):
+        """Timer callback to update UI."""
+        self.attitude_indicator.update()
         self._update_label()
     
     def _update_label(self):

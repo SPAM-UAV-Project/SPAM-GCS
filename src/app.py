@@ -6,9 +6,9 @@ import serial.tools.list_ports
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
     QLabel, QComboBox, QLineEdit, QPushButton, QFrame, QMessageBox,
-    QProgressDialog
+    QProgressDialog, QMenu
 )
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QPoint
 
 from src.theme.styles import apply_theme
 from src.connection.mavlink_manager import MavlinkManager, ConnectionType
@@ -16,6 +16,50 @@ from src.connection.message_broker import MessageBroker
 from src.pages.general_page import GeneralPage
 from src.pages.debug_page import DebugPage
 from src.pages.settings_page import SettingsPage
+
+
+class UndockedWindow(QMainWindow):
+    """Container window for undocked tabs."""
+    
+    def __init__(self, widget, title, original_index, main_window, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"SPAM-GCS - {title}")
+        self.setMinimumSize(800, 600)
+        self.resize(1000, 700)
+        
+        self._widget = widget
+        self._original_title = title
+        self._original_index = original_index
+        self._main_window = main_window
+        
+        # Create a container widget to hold the content
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(widget)
+        
+        self.setCentralWidget(container)
+        
+        # Ensure the widget is visible
+        widget.show()
+    
+    def get_title(self):
+        return self._original_title
+    
+    def get_widget(self):
+        return self._widget
+    
+    def get_original_index(self):
+        return self._original_index
+    
+    def closeEvent(self, event):
+        """Redock the tab when window is closed."""
+        # Remove widget from our layout before redocking
+        if self._widget and self._main_window:
+            # Reparent widget to main window's tab widget
+            self._widget.setParent(None)
+            self._main_window.redock_tab(self._widget, self._original_title, self._original_index)
+        event.accept()
 
 
 class MainWindow(QMainWindow):
@@ -27,6 +71,7 @@ class MainWindow(QMainWindow):
         # Initialize components
         self.mavlink_manager = MavlinkManager()
         self.message_broker = MessageBroker()
+        self._undocked_windows = []  # Track undocked windows
         
         # Connect signals
         self.mavlink_manager.message_received.connect(self._on_message_received)
@@ -147,6 +192,10 @@ class MainWindow(QMainWindow):
         
         # Tab widget for pages
         self.tab_widget = QTabWidget()
+        
+        # Enable right-click context menu on tab bar
+        self.tab_widget.tabBar().setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tab_widget.tabBar().customContextMenuRequested.connect(self._on_tab_context_menu)
         
         # Create pages
         self.general_page = GeneralPage(self.message_broker)
@@ -271,8 +320,66 @@ class MainWindow(QMainWindow):
         """Handle connection error."""
         QMessageBox.warning(self, "Error", error_msg)
     
+    def _on_tab_context_menu(self, pos: QPoint):
+        """Handle right-click context menu on tab bar."""
+        tab_bar = self.tab_widget.tabBar()
+        tab_index = tab_bar.tabAt(pos)
+        
+        if tab_index >= 0:
+            menu = QMenu(self)
+            undock_action = menu.addAction("Undock Tab")
+            
+            action = menu.exec_(tab_bar.mapToGlobal(pos))
+            if action == undock_action:
+                self._undock_tab(tab_index)
+    
+    def _undock_tab(self, index: int):
+        """Undock a tab into a separate window."""
+        if index < 0 or index >= self.tab_widget.count():
+            return
+        
+        # Get tab info before removing
+        widget = self.tab_widget.widget(index)
+        title = self.tab_widget.tabText(index)
+        
+        # Remove from tab widget
+        self.tab_widget.removeTab(index)
+        
+        # Create undocked window (pass index for restore position)
+        undocked = UndockedWindow(widget, title, original_index=index, main_window=self)
+        
+        # Apply theme to match main window
+        apply_theme(undocked)
+        
+        undocked.show()
+        
+        # Track the window
+        self._undocked_windows.append(undocked)
+    
+    def redock_tab(self, widget, title, original_index):
+        """Redock a widget back into the tab widget at its original position."""
+        # Insert at original position, clamping to valid range
+        insert_index = min(original_index, self.tab_widget.count())
+        self.tab_widget.insertTab(insert_index, widget, title)
+        self.tab_widget.setCurrentIndex(insert_index)
+        widget.show()
+        
+        # Remove from undocked windows list
+        for window in self._undocked_windows[:]:
+            if window.get_widget() == widget:
+                self._undocked_windows.remove(window)
+                break
+    
     def closeEvent(self, event):
         """Clean up on window close."""
         self.mavlink_manager.disconnect()
         self._port_refresh_timer.stop()
+        
+        # Close all undocked windows without redocking
+        # Set main_window to None to prevent redock attempts
+        for window in self._undocked_windows[:]:
+            window._main_window = None
+            window.close()
+        self._undocked_windows.clear()
+        
         event.accept()

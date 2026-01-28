@@ -5,7 +5,7 @@ RC Input Widget - Displays RC channel values.
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, QFrame, QGridLayout
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 
 
 class RCChannelBar(QWidget):
@@ -63,6 +63,16 @@ class RCWidget(QWidget):
         self.message_broker = message_broker
         self.channels = []
         self._setup_ui()
+        
+        # Buffer for latest RC values
+        self._latest_values = [1500] * 8
+        self._pending_update = False
+        
+        # Optimize: 10Hz update rate
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self._update_display)
+        self.update_timer.start(100) # 10Hz
+        
         self._subscribe_to_messages()
         
     def _setup_ui(self):
@@ -101,13 +111,22 @@ class RCWidget(QWidget):
         
     def _on_rc_channels(self, msg):
         """Handle RC_CHANNELS message."""
-        values = [
+        # Just update buffer, logic in timer
+        self._latest_values = [
             msg.chan1_raw, msg.chan2_raw, msg.chan3_raw, msg.chan4_raw,
             msg.chan5_raw, msg.chan6_raw, msg.chan7_raw, msg.chan8_raw
         ]
-        
-        for i, val in enumerate(values):
+        self._pending_update = True
+    
+    def _update_display(self):
+        """Timer callback to update UI."""
+        if not self._pending_update or not self.isVisible():
+            return
+            
+        for i, val in enumerate(self._latest_values):
             if i < len(self.channels):
                 # Clamp value
                 val = max(1000, min(2000, val))
                 self.channels[i].set_value(val)
+        
+        self._pending_update = False
