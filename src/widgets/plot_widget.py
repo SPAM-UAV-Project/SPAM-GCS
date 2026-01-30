@@ -26,6 +26,7 @@ PLOTTABLE_MESSAGES = {
     'RC_CHANNELS': ['chan1_raw', 'chan2_raw', 'chan3_raw', 'chan4_raw', 'chan5_raw', 'chan6_raw'],
     'SYS_STATUS': ['voltage_battery', 'current_battery', 'battery_remaining'],
     'NAMED_VALUE_FLOAT': ['enc_angle'],  # MAVLink truncates names to 10 chars
+    'DEBUG_FLOAT_ARRAY': ['motor_f_0', 'motor_f_1', 'motor_f_2', 'motor_f_3']
 }
 
 
@@ -81,6 +82,11 @@ class PlotWidget(QWidget):
         self.update_timer.timeout.connect(self._render_plot)
         self.update_timer.start(20)
         self._pending_update = False
+        
+        # Last received values for display
+        self.last_msg_name = ""
+        self.last_array_values = []
+        self.last_single_value = 0.0
         
         self._setup_ui()
     
@@ -146,6 +152,20 @@ class PlotWidget(QWidget):
         
         self.curve = self.plot.plot(pen=pg.mkPen('#6c63ff', width=2))
         
+        # Overlay for current value(s)
+        self.value_label = QLabel(self.plot)
+        self.value_label.setStyleSheet("""
+            background-color: rgba(37, 37, 64, 0.7);
+            color: #4ade80;
+            font-weight: bold;
+            font-size: 13px;
+            padding: 4px;
+            border-radius: 4px;
+        """)
+        self.value_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.value_label.move(10, 40)  # Below header
+        self.value_label.hide()
+        
         layout.addWidget(self.plot)
         
     def _on_time_changed(self, text):
@@ -189,6 +209,9 @@ class PlotWidget(QWidget):
             self.data.clear()
             self.time_data.clear()
             self.curve.setData([], [])
+            self.last_array_values = []
+            self.last_single_value = 0.0
+            self.value_label.hide()
 
     def _on_message_received(self, msg):
         """Unified handler for all messages, including derived fields"""
@@ -217,6 +240,30 @@ class PlotWidget(QWidget):
                         val = msg.value
             except Exception as e:
                 print(f"NAMED_VALUE_FLOAT parse error: {e}")
+
+        # Handle DEBUG_FLOAT_ARRAY messages
+        elif self.current_message == 'DEBUG_FLOAT_ARRAY':
+            try:
+                msg_name = msg.name
+                if isinstance(msg_name, bytes):
+                    msg_name = msg_name.decode('ascii', errors='ignore')
+                msg_name = msg_name.rstrip('\x00').strip()
+                self.last_msg_name = msg_name
+
+                if msg_name == "motor_f":
+                    self.last_array_values = list(msg.data[:4])
+                    # Extract index from field name motor_f_N
+                    try:
+                        idx = int(self.current_field.split('_')[-1])
+                        val = self.last_array_values[idx]
+                    except (ValueError, IndexError):
+                        pass
+                else:
+                    # Generic handling for other debug arrays
+                    # For now just plot if field matches index
+                    pass
+            except Exception as e:
+                print(f"DEBUG_FLOAT_ARRAY parse error: {e}")
 
         
         # Check if we need to derive Euler angles
@@ -250,6 +297,7 @@ class PlotWidget(QWidget):
                 pass
         
         if val is not None:
+            self.last_single_value = val
             self._buffer_data(val)
 
     def _buffer_data(self, value):
@@ -282,5 +330,18 @@ class PlotWidget(QWidget):
                     
                     # Optimization: skip finite check for speed
                     self.curve.setData(list(self.time_data), list(self.data), skipFiniteCheck=True)
+                    
+                    # Update value display
+                    if self.current_message == 'DEBUG_FLOAT_ARRAY' and self.last_msg_name == "motor_f" and self.last_array_values:
+                        vals_str = ", ".join([f"{v:.2f}" for v in self.last_array_values])
+                        self.value_label.setText(f"M: [{vals_str}]")
+                        self.value_label.show()
+                        self.value_label.adjustSize()
+                    elif self.last_single_value is not None:
+                        self.value_label.setText(f"Val: {self.last_single_value:.2f}")
+                        self.value_label.show()
+                        self.value_label.adjustSize()
+                    else:
+                        self.value_label.hide()
                     
                     self._pending_update = False
