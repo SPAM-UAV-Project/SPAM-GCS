@@ -26,7 +26,8 @@ PLOTTABLE_MESSAGES = {
     'RC_CHANNELS': ['chan1_raw', 'chan2_raw', 'chan3_raw', 'chan4_raw', 'chan5_raw', 'chan6_raw'],
     'SYS_STATUS': ['voltage_battery', 'current_battery', 'battery_remaining'],
     'NAMED_VALUE_FLOAT': ['enc_angle'],  # MAVLink truncates names to 10 chars
-    'DEBUG_FLOAT_ARRAY': ['motor_f_0', 'motor_f_1', 'motor_f_2', 'motor_f_3']
+    'DEBUG_FLOAT_ARRAY': ['motor_f_0', 'motor_f_1', 'motor_f_2', 'motor_f_3'],
+
 }
 
 
@@ -72,18 +73,13 @@ class PlotWidget(QWidget):
         
         self.time_window = 5.0  # Default 5s window
         
-        # Rate tracking for Hz display
-        self._msg_count = 0
-        self._last_rate_time = time.time()
-        self._current_hz = 0.0
-        
         # Update at 50Hz (20ms) as requested
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._render_plot)
         self.update_timer.start(20)
         self._pending_update = False
         
-        # Last received values for display
+        # Value tracking for display
         self.last_msg_name = ""
         self.last_array_values = []
         self.last_single_value = 0.0
@@ -126,13 +122,6 @@ class PlotWidget(QWidget):
         header.addWidget(self.time_combo)
         
         header.addStretch()
-        
-        # Hz display
-        self.hz_label = QLabel("-- Hz")
-        self.hz_label.setStyleSheet("color: #6c63ff; font-weight: bold; font-size: 11px;")
-        self.hz_label.setMinimumWidth(50)
-        header.addWidget(self.hz_label)
-        
         layout.addLayout(header)
         
         pg.setConfigOptions(antialias=True)
@@ -143,27 +132,24 @@ class PlotWidget(QWidget):
         self.plot.getAxis('left').setPen('#888')
         self.plot.getAxis('bottom').setPen('#888')
         
-        # Optimization: Only render what's visible
-        self.plot.getPlotItem().setClipToView(True)
-        
         # Ensure Y-axis always autofits
         self.plot.enableAutoRange(axis='y', enable=True)
         self.plot.setAutoVisible(y=True)
         
         self.curve = self.plot.plot(pen=pg.mkPen('#6c63ff', width=2))
         
-        # Overlay for current value(s)
+        # Value label overlay
         self.value_label = QLabel(self.plot)
         self.value_label.setStyleSheet("""
-            background-color: rgba(37, 37, 64, 0.7);
+            background-color: rgba(37, 37, 64, 0.8);
             color: #4ade80;
             font-weight: bold;
-            font-size: 13px;
-            padding: 4px;
+            font-size: 12px;
+            padding: 4px 6px;
             border-radius: 4px;
         """)
         self.value_label.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.value_label.move(10, 40)  # Below header
+        self.value_label.move(10, 10)
         self.value_label.hide()
         
         layout.addWidget(self.plot)
@@ -224,32 +210,25 @@ class PlotWidget(QWidget):
         if self.current_message == 'NAMED_VALUE_FLOAT':
             try:
                 if hasattr(msg, 'name') and hasattr(msg, 'value'):
-                    # Decode name (may be bytes) and normalize
-                    # MAVLink stores names as fixed 10-char array padded with nulls/spaces
+                    # Decode name (may be bytes)
                     msg_name = msg.name
                     if isinstance(msg_name, bytes):
-                        msg_name = msg_name.decode('ascii', errors='ignore')
-                    # Strip null terminators, spaces, and any other padding
-                    msg_name = msg_name.rstrip('\x00').strip()
-                    
-                    # Debug: uncomment to see what names are being received
-                    # print(f"NAMED_VALUE_FLOAT: name='{msg_name}', looking for='{self.current_field}', value={msg.value}")
+                        msg_name = msg_name.decode('ascii').rstrip('\x00')
                     
                     # Check if this is the named value we're plotting
                     if msg_name == self.current_field:
                         val = msg.value
-            except Exception as e:
-                print(f"NAMED_VALUE_FLOAT parse error: {e}")
-
-        # Handle DEBUG_FLOAT_ARRAY messages
+            except Exception:
+                pass
+        
+        # Handle DEBUG_FLOAT_ARRAY (motor_f)
         elif self.current_message == 'DEBUG_FLOAT_ARRAY':
             try:
                 msg_name = msg.name
                 if isinstance(msg_name, bytes):
-                    msg_name = msg_name.decode('ascii', errors='ignore')
-                msg_name = msg_name.rstrip('\x00').strip()
+                    msg_name = msg_name.decode('ascii', errors='ignore').rstrip('\x00').strip()
                 self.last_msg_name = msg_name
-
+                
                 if msg_name == "motor_f":
                     self.last_array_values = list(msg.data[:4])
                     # Extract index from field name motor_f_N
@@ -258,13 +237,8 @@ class PlotWidget(QWidget):
                         val = self.last_array_values[idx]
                     except (ValueError, IndexError):
                         pass
-                else:
-                    # Generic handling for other debug arrays
-                    # For now just plot if field matches index
-                    pass
-            except Exception as e:
-                print(f"DEBUG_FLOAT_ARRAY parse error: {e}")
-
+            except Exception:
+                pass
         
         # Check if we need to derive Euler angles
         elif self.current_field in ['roll', 'pitch', 'yaw', 'roll_deg', 'pitch_deg', 'yaw_deg']:
@@ -306,20 +280,8 @@ class PlotWidget(QWidget):
             self.time_data.append(t)
             self.data.append(value)
             self._pending_update = True
-            
-            # Track message rate
-            self._msg_count += 1
         
     def _render_plot(self):
-        # Calculate Hz every render (50Hz timer)
-        now = time.time()
-        elapsed = now - self._last_rate_time
-        if elapsed >= 0.5:  # Update Hz display every 0.5s
-            self._current_hz = self._msg_count / elapsed
-            self._msg_count = 0
-            self._last_rate_time = now
-            self.hz_label.setText(f"{self._current_hz:.0f} Hz")
-        
         if self._pending_update and self.isVisible():
             with self.data_lock:
                 if len(self.time_data) > 0:
@@ -327,9 +289,7 @@ class PlotWidget(QWidget):
                     t_min = t_current - self.time_window
                     
                     self.plot.setXRange(t_min, t_current, padding=0)
-                    
-                    # Optimization: skip finite check for speed
-                    self.curve.setData(list(self.time_data), list(self.data), skipFiniteCheck=True)
+                    self.curve.setData(list(self.time_data), list(self.data))
                     
                     # Update value display
                     if self.current_message == 'DEBUG_FLOAT_ARRAY' and self.last_msg_name == "motor_f" and self.last_array_values:
@@ -341,7 +301,5 @@ class PlotWidget(QWidget):
                         self.value_label.setText(f"Val: {self.last_single_value:.2f}")
                         self.value_label.show()
                         self.value_label.adjustSize()
-                    else:
-                        self.value_label.hide()
                     
                     self._pending_update = False

@@ -13,6 +13,7 @@ from PyQt5.QtCore import Qt, QTimer, QPoint
 from src.theme.styles import apply_theme
 from src.connection.mavlink_manager import MavlinkManager, ConnectionType
 from src.connection.message_broker import MessageBroker
+from src.logging.mavlink_logger import MavlinkLogger
 from src.pages.general_page import GeneralPage
 from src.pages.debug_page import DebugPage
 from src.pages.settings_page import SettingsPage
@@ -71,6 +72,7 @@ class MainWindow(QMainWindow):
         # Initialize components
         self.mavlink_manager = MavlinkManager()
         self.message_broker = MessageBroker()
+        self.logger = MavlinkLogger(self.message_broker)
         self._undocked_windows = []  # Track undocked windows
         
         # Connect signals
@@ -187,6 +189,16 @@ class MainWindow(QMainWindow):
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.clicked.connect(self._on_connect_clicked)
         connection_layout.addWidget(self.connect_btn)
+        
+        # Log toggle button
+        self.log_btn = QPushButton("Log")
+        self.log_btn.setCheckable(True)
+        self.log_btn.clicked.connect(self._on_log_clicked)
+        self.log_btn.setStyleSheet("""
+            QPushButton { background-color: #374151; }
+            QPushButton:checked { background-color: #dc2626; }
+        """)
+        connection_layout.addWidget(self.log_btn)
         
         main_layout.addWidget(connection_frame)
         
@@ -372,6 +384,10 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         """Clean up on window close."""
+        # Stop logger first to ensure data is saved
+        if self.logger.is_logging:
+            self.logger.stop()
+        
         self.mavlink_manager.disconnect()
         self._port_refresh_timer.stop()
         
@@ -383,3 +399,12 @@ class MainWindow(QMainWindow):
         self._undocked_windows.clear()
         
         event.accept()
+
+    def _on_log_clicked(self, checked: bool):
+        """Handle log button toggle."""
+        if checked:
+            log_path = self.logger.start()
+            self.log_btn.setText("Stop Log")
+        else:
+            self.logger.stop()
+            self.log_btn.setText("Log")
